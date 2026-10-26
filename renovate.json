@@ -23,6 +23,14 @@
             ],
             "internalChecksFilter": "strict",
             "minimumReleaseAge": "3 days"
+        },
+        {
+            "description": "windows and windows-core must stay on matching versions.",
+            "matchPackageNames": [
+                "windows",
+                "windows-core"
+            ],
+            "groupName": "windows crates"
         }
     ]
 }
