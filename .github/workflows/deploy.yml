@@ -1,0 +1,55 @@
+name: Deploy
+
+on:
+    release:
+        types: [ published ]
+
+jobs:
+    test:
+        uses: ./.github/workflows/test.yml
+    deploy:
+        needs: test
+        permissions:
+            attestations: write
+            contents: write
+            id-token: write
+        environment: release
+        runs-on: windows-latest
+        env:
+            RELEASE_TAG: ${{ github.event.release.tag_name }}
+        steps:
+            -   name: Validate release tag
+                run: |
+                    if ($env:RELEASE_TAG -notmatch '^v?(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$') {
+                        Write-Output "::error::Release tag '$env:RELEASE_TAG' is not a valid version. Expected MAJOR.MINOR.PATCH[-prerelease], with an optional leading 'v'."
+                        exit 1
+                    }
+                    "EOSVCAM_VERSION=$($Matches[1])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            -   name: Checkout
+                uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+                with:
+                    persist-credentials: false
+            -   name: Cache cargo
+                uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+            -   name: Package
+                run: ./scripts/pack.ps1
+            -   name: Name the zip after the release
+                run: |
+                    $zip = "EosVCam-$env:RELEASE_TAG.zip"
+                    Move-Item dist/EosVCam.zip "dist/$zip"
+                    "ZIP=dist/$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            -   name: Write checksum
+                run: |
+                    $hash = (Get-FileHash -Algorithm SHA256 $env:ZIP).Hash.ToLowerInvariant()
+                    $name = Split-Path $env:ZIP -Leaf
+                    # sha256sum format so `sha256sum -c` can verify it.
+                    [System.IO.File]::WriteAllText("$PWD/$env:ZIP.sha256", "$hash  $name`n")
+            -   name: Attest build provenance
+                uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+                with:
+                    subject-path: ${{ env.ZIP }}
+            -   name: Upload release assets
+                run: gh release upload "$env:RELEASE_TAG" "$env:ZIP" "$env:ZIP.sha256" --clobber
+                env:
+                    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                    GH_REPO: ${{ github.repository }}

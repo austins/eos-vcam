@@ -1,0 +1,21 @@
+name: Main
+
+on:
+    push:
+        branches: [ main ]
+        paths:
+            - '.cargo/**'
+            - 'Cargo.toml'
+            - 'Cargo.lock'
+            - 'crates/**'
+            - 'package/**'
+            - 'scripts/**'
+    workflow_dispatch:
+
+concurrency:
+    group: main
+    cancel-in-progress: true
+
+jobs:
+    test:
+        uses: ./.github/workflows/test.yml

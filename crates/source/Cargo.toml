@@ -1,0 +1,17 @@
+[package]
+name = "eosvcam-source"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "eosvcam_source"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eosvcam-shared.workspace = true
+windows.workspace = true
+windows-core.workspace = true
+
+[lints]
+workspace = true
