@@ -44,7 +44,7 @@ Lints live in the workspace `Cargo.toml` and are strict: `clippy::all`, `undocum
 
 ## CI
 
-`.github/workflows`: `pr.yml` and `main.yml` call `test.yml` (fmt, clippy, tests on `windows-latest`, MSVC target). `deploy.yml` runs on a published release: tests, `scripts/pack.ps1`, then uploads `EosVCam-<tag>.zip` plus a `.sha256` and attests build provenance. The tag is validated and passed to the build as `EOSVCAM_VERSION` (shown by `eosvcam.exe version`); local builds report `dev` (the crates have no `version` in `Cargo.toml`). The zip never contains Canon files. None of this has run on GitHub yet.
+`.github/workflows`: `pr.yml` and `main.yml` call `test.yml` (fmt, clippy, tests on `windows-latest`, MSVC target). `deploy.yml` runs on a published release: tests, `scripts/pack.ps1`, then uploads `EosVCam-<version>.zip` (the tag without any leading `v`) plus a `.sha256` and attests build provenance. The tag is validated and passed to the build as `EOSVCAM_VERSION` (shown by `eosvcam.exe version`); local builds report `dev` (the crates have no `version` in `Cargo.toml`). The zip never contains Canon files. None of this has run on GitHub yet.
 
 ## Windows 11 virtual camera pitfalls
 
