@@ -64,3 +64,5 @@ This repository contains no Canon files. Set `SDK_DIR` for `scripts/pack.sh` onl
 ## License
 
 [MIT](LICENSE). Canon's SDK is subject to Canon's own license terms.
+
+Test
