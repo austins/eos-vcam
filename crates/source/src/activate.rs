@@ -6,17 +6,13 @@
 use std::ffi::c_void;
 use std::sync::Mutex;
 
-use windows::Win32::Foundation::E_FAIL;
-use windows::Win32::Media::MediaFoundation::{
-    IMFActivate, IMFActivate_Impl, IMFAttributes, IMFAttributes_Impl, IMFMediaSourceEx,
+use eosvcam_shared::windows_bindings::{
+    E_FAIL, IMFActivate, IMFActivate_Impl, IMFAttributes, IMFAttributes_Impl, IMFMediaSourceEx,
     MF_ATTRIBUTE_TYPE, MF_ATTRIBUTES_MATCH_TYPE,
     MF_VIRTUALCAMERA_PROVIDE_ASSOCIATED_CAMERA_SOURCES, MFCreateAttributes,
-    MFT_TRANSFORM_CLSID_Attribute,
+    MFT_TRANSFORM_CLSID_Attribute, PROPVARIANT,
 };
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::core::{
-    BOOL, Error, GUID, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement,
-};
+use windows_core::{BOOL, Error, GUID, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement};
 
 use eosvcam_shared::log;
 
@@ -33,12 +29,14 @@ impl Activator {
     pub fn new() -> Result<Self> {
         let mut attrs = None;
         // SAFETY: out pointer is valid for one interface.
-        unsafe { MFCreateAttributes(&mut attrs, 0)? };
+        unsafe { MFCreateAttributes(&mut attrs, 0).ok()? };
         let attrs = attrs.ok_or_else(|| Error::from(E_FAIL))?;
         // SAFETY: setting standard virtual-camera activator attributes on a fresh store.
         unsafe {
-            attrs.SetUINT32(&MF_VIRTUALCAMERA_PROVIDE_ASSOCIATED_CAMERA_SOURCES, 1)?;
-            attrs.SetGUID(&MFT_TRANSFORM_CLSID_Attribute, &CLSID)?;
+            attrs
+                .SetUINT32(&MF_VIRTUALCAMERA_PROVIDE_ASSOCIATED_CAMERA_SOURCES, 1)
+                .ok()?;
+            attrs.SetGUID(&MFT_TRANSFORM_CLSID_Attribute, &CLSID).ok()?;
         }
         Ok(Self {
             attrs,
@@ -60,7 +58,7 @@ impl IMFActivate_Impl for Activator_Impl {
             ppv.is_null()
         );
         if riid.is_null() || ppv.is_null() {
-            return Err(Error::from(windows::Win32::Foundation::E_POINTER));
+            return Err(Error::from(eosvcam_shared::windows_bindings::E_POINTER));
         }
         let mut slot = self.source.lock().map_err(|_| Error::from(E_FAIL))?;
         if slot.is_none() {
@@ -78,11 +76,11 @@ impl IMFActivate_Impl for Activator_Impl {
 
     fn ShutdownObject(&self) -> Result<()> {
         log!("ShutdownObject");
-        if let Ok(mut slot) = self.source.lock() {
-            if let Some(s) = slot.take() {
-                // SAFETY: Shutdown takes no arguments.
-                let _ = unsafe { s.Shutdown() };
-            }
+        if let Ok(mut slot) = self.source.lock()
+            && let Some(s) = slot.take()
+        {
+            // SAFETY: Shutdown takes no arguments.
+            let _ = unsafe { s.Shutdown() };
         }
         Ok(())
     }
@@ -330,7 +328,7 @@ macro_rules! forward_mf_attributes {
                     },
                     v.is_null()
                 );
-                r
+                r.ok()
             }
             fn LockStore(&self) -> Result<()> {
                 // SAFETY: takes no pointer arguments.
@@ -358,7 +356,7 @@ macro_rules! forward_mf_attributes {
             }
             fn CopyAllItems(&self, dest: Ref<IMFAttributes>) -> Result<()> {
                 // SAFETY: `dest.as_ref()` passes Option<&IMFAttributes> without rejecting null via Ref::ok().
-                unsafe { self.$field.CopyAllItems(dest.as_ref()) }
+                unsafe { self.$field.CopyAllItems(dest.as_ref()).ok() }
             }
         }
     };

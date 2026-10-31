@@ -10,7 +10,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 eosvcam-shared.workspace = true
-windows.workspace = true
 windows-core.workspace = true
 
 [lints]

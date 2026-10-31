@@ -9,7 +9,10 @@ Cargo.toml, Cargo.lock      workspace manifest (shared lints, release profile, d
 .cargo/config.toml          default target and static CRT settings
 crates/
   shared/                   library used by both binaries below
+    windows-bindings.txt    Win32 names to generate bindings for (windows-bindgen filters)
+    build.rs                runs windows-bindgen on that list at build time
     src/lib.rs              constants: CLSID, camera/service names, data dir
+    src/windows_bindings.rs the generated bindings plus helpers and constants the metadata lacks
     src/shm.rs              shared-memory ring between feeder and source (fixed 1280x720@30 NV12)
     src/log.rs              size-capped file logging to C:\ProgramData\EosVCam
   source/                   eosvcam_source.dll, loaded by Windows' Frame Server (reader side)
@@ -20,7 +23,7 @@ crates/
     src/main.rs             command-line entry point and dispatch
     src/install.rs          install, uninstall and status (registry, service, virtual camera)
     src/sdk.rs              finds Canon's SDK DLLs (folder, .zip or .cab) for the installer
-    src/service.rs          Windows service wrapper around the feeder
+    src/service.rs          Windows service wrapper around the feeder (windows-services crate)
     src/feeder.rs           camera session and decode loop that publishes frames into the ring
     src/edsdk.rs            dynamic binding to Canon's EDSDK.dll
     src/decode.rs           JPEG decode, centre 16:9 crop, scale, NV12 output
@@ -52,6 +55,14 @@ Lints live in the workspace `Cargo.toml` and are strict: `clippy::all`, `undocum
 - The activator forwards `IMFAttributes`; `SetUnknown(null)` is legal and must not return `E_POINTER`.
 - The source must publish persistent attributes and sensor profiles (`KSCAMERAPROFILE_Legacy`, `HighFrameRate`) or apps may not enumerate it.
 - Names that must stay in sync: CLSID `{6F0B9D3A-4C1E-4E53-9A57-3D1C2B7E8A41}`, service `EosVCamFeeder`, shm objects `EosVCamFrames`/`EosVCamFrameReady`, env `EOSVCAM_NS` (test namespace) and `EOSVCAM_TEST_JPEG`.
+
+## Windows bindings
+
+There is no `windows` crate dependency. Win32 APIs come from `eosvcam_shared::windows_bindings`, which `windows-bindgen` generates at build time from `crates/shared/windows-bindings.txt`; COM support types (`GUID`, `HRESULT`, `implement`, `w!`) come from `windows-core`. `windows-bindgen`, `windows-core` and `windows-services` must stay on the same version.
+
+- Add a name to `windows-bindings.txt` before using it. List every interface whose methods are called or implemented, including base interfaces: unlisted interfaces are opaque stubs without methods or `_Impl` traits.
+- The bundled metadata is generated from SDK headers, so the bindings are rawer than the old `windows` crate: constants are plain `i32`, many functions return `BOOL`, `HANDLE` or `HRESULT` instead of `Result` (use `.ok()`; `HANDLE::ok` and `HINSTANCE::ok` treat null as failure), and `PROPVARIANT` does not free itself (use `PROPVARIANT::into_unknown`).
+- Known metadata gaps: some GUIDs are missing or generated as empty structs (defined by hand in `windows_bindings.rs`), `IWICBitmapSource::CopyPixels` treats its output buffer as a one-byte return value (call the vtable directly, as `decode.rs` does), and `IWICImagingFactory` lacks `CreateFastMetadataEncoderFromFrameDecode`, so its last methods have shifted vtable slots and must not be called.
 
 ## Canon SDK
 

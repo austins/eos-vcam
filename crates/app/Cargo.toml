@@ -8,7 +8,8 @@ publish.workspace = true
 anyhow.workspace = true
 eosvcam-shared.workspace = true
 eosvcam-source = { path = "../source" }
-windows.workspace = true
+windows-core.workspace = true
+windows-services.workspace = true
 
 [lints]
 workspace = true

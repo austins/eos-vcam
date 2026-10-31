@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, bail};
 use eosvcam_shared::log;
-use windows::Win32::System::Console::SetConsoleCtrlHandler;
-use windows::core::BOOL;
+use eosvcam_shared::windows_bindings::SetConsoleCtrlHandler;
+use windows_core::BOOL;
 
 /// Release builds set EOSVCAM_VERSION from the release tag; local builds report "dev".
 const VERSION: &str = match option_env!("EOSVCAM_VERSION") {
@@ -51,7 +51,7 @@ fn real_main() -> Result<()> {
         Some("console") => {
             log::init("feeder", true);
             // SAFETY: the handler only touches an atomic.
-            unsafe { SetConsoleCtrlHandler(Some(on_ctrl_c), true)? };
+            unsafe { SetConsoleCtrlHandler(Some(on_ctrl_c), true).ok()? };
             feeder::run(&STOP, args.iter().any(|a| a == "--synthetic"))
         }
         Some("install") => {

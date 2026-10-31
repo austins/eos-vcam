@@ -7,23 +7,15 @@
 use std::ptr;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering, fence};
 
-use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HLOCAL, INVALID_HANDLE_VALUE,
-    LocalFree, WAIT_OBJECT_0,
+use crate::windows_bindings::{
+    CloseHandle, ConvertStringSecurityDescriptorToSecurityDescriptorW, CreateEventW,
+    CreateFileMappingW, ERROR_ALREADY_EXISTS, EVENT_MODIFY_STATE, FILE_MAP_ALL_ACCESS,
+    GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree, MapViewOfFile, OpenEventW,
+    OpenFileMappingW, PAGE_READWRITE, PSECURITY_DESCRIPTOR, QueryPerformanceCounter,
+    QueryPerformanceFrequency, ResetEvent, SDDL_REVISION_1, SECURITY_ATTRIBUTES, SYNCHRONIZE,
+    SetEvent, UnmapViewOfFile, WAIT_OBJECT_0, WaitForSingleObject,
 };
-use windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
-};
-use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
-use windows::Win32::System::Memory::{
-    CreateFileMappingW, FILE_MAP_ALL_ACCESS, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
-    OpenFileMappingW, PAGE_READWRITE, UnmapViewOfFile,
-};
-use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
-use windows::Win32::System::Threading::{
-    CreateEventW, EVENT_MODIFY_STATE, OpenEventW, ResetEvent, SetEvent, WaitForSingleObject,
-};
-use windows::core::{Error, PCWSTR, Result, w};
+use windows_core::{Error, PCWSTR, Result, w};
 
 pub const WIDTH: u32 = 1280;
 pub const HEIGHT: u32 = 720;
@@ -129,11 +121,11 @@ impl Mapping {
         let sd_ok = unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 SDDL,
-                SDDL_REVISION_1,
+                SDDL_REVISION_1 as u32,
                 &mut psd,
                 None,
             )
-            .is_ok()
+            .as_bool()
         };
         if !sd_ok {
             crate::log!("shm: security descriptor rejected, using the default one");
@@ -154,18 +146,27 @@ impl Mapping {
             let map = CreateFileMappingW(
                 INVALID_HANDLE_VALUE,
                 sa_ptr,
-                PAGE_READWRITE,
+                PAGE_READWRITE as u32,
                 0,
                 MAP_SIZE as u32,
                 map_name,
-            );
-            let existed = GetLastError() == ERROR_ALREADY_EXISTS;
-            map.and_then(|m| CreateEventW(sa_ptr, true, false, event_name).map(|e| (m, e, existed)))
+            )
+            .ok();
+            let existed = GetLastError() == ERROR_ALREADY_EXISTS as u32;
+            map.and_then(
+                |m| match CreateEventW(sa_ptr, true, false, event_name).ok() {
+                    Ok(e) => Ok((m, e, existed)),
+                    Err(e) => {
+                        let _ = CloseHandle(m);
+                        Err(e)
+                    }
+                },
+            )
         };
         if sd_ok {
             // SAFETY: psd was allocated by the conversion call above.
             unsafe {
-                let _ = LocalFree(Some(HLOCAL(psd.0)));
+                let _ = LocalFree(HANDLE(psd.0));
             }
         }
         let (map, event, existed) = made?;
@@ -214,12 +215,16 @@ impl Mapping {
         );
         // SAFETY: the names are valid NUL-terminated strings.
         let (map, event) = unsafe {
-            let map = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(map_name.as_ptr()))?;
+            let map =
+                OpenFileMappingW(FILE_MAP_ALL_ACCESS as u32, false, PCWSTR(map_name.as_ptr()))
+                    .ok()?;
             match OpenEventW(
-                EVENT_MODIFY_STATE | SYNCHRONIZE_RIGHT,
+                (EVENT_MODIFY_STATE | SYNCHRONIZE) as u32,
                 false,
                 PCWSTR(event_name.as_ptr()),
-            ) {
+            )
+            .ok()
+            {
                 Ok(e) => (map, e),
                 Err(e) => {
                     let _ = CloseHandle(map);
@@ -250,7 +255,7 @@ impl Mapping {
             || h.frame_bytes.load(Ordering::Relaxed) as usize != FRAME_BYTES
         {
             return Err(Error::new(
-                windows::Win32::Foundation::E_FAIL,
+                crate::windows_bindings::E_FAIL,
                 "frame ring has an unexpected layout",
             ));
         }
@@ -362,21 +367,19 @@ impl Mapping {
             if self.write_seq() > after {
                 return true;
             }
-            WaitForSingleObject(self.event, timeout_ms) == WAIT_OBJECT_0 && self.write_seq() > after
+            WaitForSingleObject(self.event, timeout_ms) == WAIT_OBJECT_0 as u32
+                && self.write_seq() > after
         }
     }
 }
 
-const SYNCHRONIZE_RIGHT: windows::Win32::System::Threading::SYNCHRONIZATION_ACCESS_RIGHTS =
-    windows::Win32::System::Threading::SYNCHRONIZATION_SYNCHRONIZE;
-
 fn view(map: HANDLE) -> Result<*mut u8> {
     // SAFETY: map is a valid file-mapping handle.
-    let v = unsafe { MapViewOfFile(map, FILE_MAP_ALL_ACCESS, 0, 0, MAP_SIZE) };
-    if v.Value.is_null() {
+    let v = unsafe { MapViewOfFile(map, FILE_MAP_ALL_ACCESS as u32, 0, 0, MAP_SIZE) };
+    if v.is_null() {
         Err(Error::from_thread())
     } else {
-        Ok(v.Value as *mut u8)
+        Ok(v.cast())
     }
 }
 
@@ -384,9 +387,7 @@ impl Drop for Mapping {
     fn drop(&mut self) {
         // SAFETY: base, map and event are owned by self and not used afterwards.
         unsafe {
-            let _ = UnmapViewOfFile(MEMORY_MAPPED_VIEW_ADDRESS {
-                Value: self.base as *mut _,
-            });
+            let _ = UnmapViewOfFile(self.base.cast());
             let _ = CloseHandle(self.event);
             let _ = CloseHandle(self.map);
         }

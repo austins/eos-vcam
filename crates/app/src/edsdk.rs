@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use eosvcam_shared::log;
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW, SetDllDirectoryW};
-use windows::core::{HSTRING, PCSTR};
+use eosvcam_shared::windows_bindings::{GetProcAddress, LoadLibraryW, SetDllDirectoryW};
+use windows_core::{HSTRING, PCSTR};
 
 type Ref = *mut c_void;
 type Err = u32;
@@ -38,7 +38,7 @@ macro_rules! sdk {
         pub struct Sdk { $($field: unsafe extern "system" fn($($arg),*) -> $ret,)* }
 
         impl Sdk {
-            fn bind(m: windows::Win32::Foundation::HMODULE) -> Result<Self> {
+            fn bind(m: eosvcam_shared::windows_bindings::HMODULE) -> Result<Self> {
                 Ok(Self { $($field: {
                     // SAFETY: the symbol is NUL-terminated and the signature matches EDSDK's C header.
                     let p = unsafe { GetProcAddress(m, PCSTR(concat!($sym, "\0").as_ptr())) }
@@ -104,8 +104,11 @@ impl Sdk {
         log!("using EDSDK from {}", dir.display());
         // SAFETY: loading a vendor DLL by absolute path; its dependencies sit in the same folder.
         unsafe {
-            SetDllDirectoryW(&HSTRING::from(dir.as_os_str())).context("SetDllDirectory")?;
+            SetDllDirectoryW(&HSTRING::from(dir.as_os_str()))
+                .ok()
+                .context("SetDllDirectory")?;
             let m = LoadLibraryW(&HSTRING::from(dir.join("EDSDK.dll").as_os_str()))
+                .ok()
                 .context("loading EDSDK.dll")?;
             Self::bind(m)
         }

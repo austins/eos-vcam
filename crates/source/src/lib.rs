@@ -10,12 +10,11 @@ use std::ffi::c_void;
 use std::sync::Once;
 
 use eosvcam_shared::log;
-use windows::Win32::Foundation::{
-    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, E_POINTER, S_FALSE,
+use eosvcam_shared::windows_bindings::{
+    CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, E_POINTER, IClassFactory, IClassFactory_Impl,
+    IMFMediaSourceEx, S_FALSE,
 };
-use windows::Win32::Media::MediaFoundation::IMFMediaSourceEx;
-use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
-use windows::core::{BOOL, GUID, HRESULT, IUnknown, Interface, Ref, Result, implement};
+use windows_core::{BOOL, GUID, HRESULT, IUnknown, Interface, Ref, Result, implement};
 
 pub use media::create_source;
 

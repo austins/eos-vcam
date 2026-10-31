@@ -9,11 +9,11 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use eosvcam_shared::log;
 use eosvcam_shared::shm::{self, FPS, FRAME_BYTES, HEIGHT, Mapping, WIDTH, now_100ns, status};
-use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
-use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
-use windows::Win32::System::Threading::CreateMutexW;
-use windows::core::PCWSTR;
+use eosvcam_shared::windows_bindings::{
+    COINIT_MULTITHREADED, CloseHandle, CoInitializeEx, CreateMutexW, ERROR_ALREADY_EXISTS,
+    GetLastError, HANDLE, timeBeginPeriod, timeEndPeriod,
+};
+use windows_core::PCWSTR;
 
 use crate::decode::Decoder;
 use crate::edsdk::{Frame, OpenError, Sdk};
@@ -25,18 +25,18 @@ const STALL_LIMIT: Duration = Duration::from_secs(8);
 pub fn run(stop: &AtomicBool, synthetic: bool) -> Result<()> {
     let name = shm::object_name("EosVCamFeeder");
     // SAFETY: name is a valid NUL-terminated wide string.
-    let lock = unsafe { CreateMutexW(None, false, PCWSTR(name.as_ptr()))? };
+    let lock = unsafe { CreateMutexW(None, false, PCWSTR(name.as_ptr())).ok()? };
     // SAFETY: reads the error of the call above on this thread.
-    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS as u32 {
         // SAFETY: lock is a handle we own.
-        unsafe { CloseHandle(lock)? };
+        unsafe { CloseHandle(lock).ok()? };
         bail!("another EosVCam feeder is already running (stop the EosVCamFeeder service first)");
     }
     let _lock = Handle(lock);
 
     // SAFETY: balanced by timeEndPeriod below; COM stays initialised for the thread's lifetime.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED as u32);
         timeBeginPeriod(1);
     }
     let result = serve(stop, synthetic);
@@ -216,7 +216,7 @@ fn camera_session(sdk: &Sdk, map: &Mapping, keep: &(dyn Fn() -> bool + Sync)) ->
 fn decode_loop(mailbox: &Mailbox, map: &Mapping) {
     // SAFETY: initialises COM for this thread, which WIC requires.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED as u32);
     }
     let mut decoder = match Decoder::new() {
         Ok(d) => d,
@@ -300,8 +300,8 @@ pub fn render_test_frame(n: u32, frame: &mut [u8]) {
         line.fill(128);
         if row * 2 >= BLOCK {
             let end = (bar + 48).min(w);
-            for pair in line[bar & !1..end].chunks_exact_mut(2) {
-                pair.copy_from_slice(&[90, 210]);
+            for pair in line[bar & !1..end].as_chunks_mut::<2>().0 {
+                *pair = [90, 210];
             }
         }
     }

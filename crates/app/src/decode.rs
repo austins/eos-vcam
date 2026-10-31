@@ -2,12 +2,12 @@
 
 use anyhow::Result;
 use eosvcam_shared::shm::{FRAME_BYTES, HEIGHT, WIDTH};
-use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat24bppBGR, IWICImagingFactory,
-    WICBitmapDitherTypeNone, WICBitmapInterpolationModeLinear, WICBitmapPaletteTypeCustom,
-    WICDecodeMetadataCacheOnDemand, WICRect,
+use eosvcam_shared::windows_bindings::{
+    CLSCTX_INPROC_SERVER, CLSID_WICImagingFactory, CoCreateInstance, GUID_WICPixelFormat24bppBGR,
+    IWICImagingFactory, WICBitmapDitherTypeNone, WICBitmapInterpolationModeLinear,
+    WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnDemand, WICRect,
 };
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+use windows_core::Interface;
 
 use crate::convert::bgr_to_nv12;
 
@@ -34,7 +34,9 @@ impl Decoder {
         // SAFETY: the WIC objects below only borrow `jpeg` until CopyPixels returns.
         unsafe {
             let stream = self.factory.CreateStream()?;
-            stream.InitializeFromMemory(jpeg)?;
+            stream
+                .InitializeFromMemory(jpeg.as_ptr(), jpeg.len() as u32)
+                .ok()?;
             let decoder = self.factory.CreateDecoderFromStream(
                 &stream,
                 std::ptr::null(),
@@ -42,7 +44,7 @@ impl Decoder {
             )?;
             let frame = decoder.GetFrame(0)?;
             let (mut w, mut h) = (0, 0);
-            frame.GetSize(&mut w, &mut h)?;
+            frame.GetSize(&mut w, &mut h).ok()?;
 
             let (x, y, cw, ch) = crop_rect(w, h);
             let rect = WICRect {
@@ -52,9 +54,11 @@ impl Decoder {
                 Height: ch as i32,
             };
             let clipper = self.factory.CreateBitmapClipper()?;
-            clipper.Initialize(&frame, &rect)?;
+            clipper.Initialize(&frame, &rect).ok()?;
             let scaler = self.factory.CreateBitmapScaler()?;
-            scaler.Initialize(&clipper, WIDTH, HEIGHT, WICBitmapInterpolationModeLinear)?;
+            scaler
+                .Initialize(&clipper, WIDTH, HEIGHT, WICBitmapInterpolationModeLinear)
+                .ok()?;
             let conv = self.factory.CreateFormatConverter()?;
             conv.Initialize(
                 &scaler,
@@ -63,8 +67,18 @@ impl Decoder {
                 None,
                 0.0,
                 WICBitmapPaletteTypeCustom,
-            )?;
-            conv.CopyPixels(std::ptr::null(), WIDTH * 3, &mut self.bgr)?;
+            )
+            .ok()?;
+            // The generated CopyPixels wrapper mistakes the output buffer for a one-byte return
+            // value (the metadata lacks its size annotation), so call the vtable directly.
+            (Interface::vtable(&conv).base__.CopyPixels)(
+                conv.as_raw(),
+                std::ptr::null(),
+                WIDTH * 3,
+                self.bgr.len() as u32,
+                self.bgr.as_mut_ptr(),
+            )
+            .ok()?;
             bgr_to_nv12(&self.bgr, nv12);
             Ok((w, h))
         }
@@ -84,7 +98,7 @@ fn crop_rect(w: u32, h: u32) -> (u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+    use eosvcam_shared::windows_bindings::{COINIT_MULTITHREADED, CoInitializeEx};
 
     #[test]
     fn crop_is_centred_16_9() {
@@ -103,7 +117,7 @@ mod tests {
         let jpeg = std::fs::read(path).unwrap();
         // SAFETY: COM init for the test thread.
         unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED as u32);
         }
         let mut nv12 = vec![0; FRAME_BYTES];
         let t0 = std::time::Instant::now();

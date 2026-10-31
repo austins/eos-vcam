@@ -6,15 +6,8 @@ use std::time::Duration;
 
 use eosvcam_shared::log;
 use eosvcam_shared::shm::{FPS, FRAME_BYTES, HEIGHT, Mapping, WIDTH, now_100ns, status};
-use windows::Win32::Foundation::{E_FAIL, E_POINTER, S_OK};
-use windows::Win32::Media::KernelStreaming::{
-    IKsControl, IKsControl_Impl, KSCAMERAPROFILE_HighFrameRate, KSCAMERAPROFILE_Legacy,
-    KSIDENTIFIER, PINNAME_VIDEO_CAPTURE,
-};
-use windows::Win32::Media::MediaFoundation::*;
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::core::{
+use eosvcam_shared::windows_bindings::*;
+use windows_core::{
     AsImpl, BOOL, Error, GUID, HRESULT, IUnknown, Interface, PCSTR, PCWSTR, PWSTR, Ref, Result,
     implement, w,
 };
@@ -43,7 +36,7 @@ fn add_sensor_profiles(attrs: &IMFAttributes) -> Result<()> {
         unsafe extern "system" fn(*const GUID, u32, PCWSTR, *mut *mut c_void) -> HRESULT;
     // SAFETY: dynamically resolves mfsensorgroup.dll (present on Windows 10/11, absent under Wine) and adds stream 0 profiles.
     unsafe {
-        let m = LoadLibraryW(w!("mfsensorgroup.dll"))?;
+        let m = LoadLibraryW(w!("mfsensorgroup.dll")).ok()?;
         let mk_col: CreateCol = std::mem::transmute(
             GetProcAddress(m, PCSTR(c"MFCreateSensorProfileCollection".as_ptr().cast()))
                 .ok_or_else(|| Error::from(E_FAIL))?,
@@ -65,46 +58,50 @@ fn add_sensor_profiles(attrs: &IMFAttributes) -> Result<()> {
             let mut p = std::ptr::null_mut();
             mk_prof(ty, 0, PCWSTR::null(), &mut p).ok()?;
             let prof = IMFSensorProfile::from_raw(p);
-            prof.AddProfileFilter(0, filter)?;
-            col.AddProfile(&prof)?;
+            prof.AddProfileFilter(0, filter).ok()?;
+            col.AddProfile(&prof).ok()?;
         }
-        attrs.SetUnknown(&MF_DEVICEMFT_SENSORPROFILE_COLLECTION, &col)
+        attrs
+            .SetUnknown(&MF_DEVICEMFT_SENSORPROFILE_COLLECTION, &col)
+            .ok()
     }
 }
 
 pub fn create_source(init_attrs: Option<&IMFAttributes>) -> Result<IMFMediaSourceEx> {
     // SAFETY: MFStartup has no preconditions; it is reference counted.
-    unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL)? };
+    unsafe { MFStartup(MF_VERSION as u32, MFSTARTUP_FULL as u32).ok()? };
     let mt = media_type()?;
     // SAFETY: the media type is valid and the descriptor array holds one entry.
     let desc = unsafe { MFCreateStreamDescriptor(0, &[Some(mt.clone())])? };
     let mut stream_attrs = None;
     // SAFETY: the out pointer is a live local.
     unsafe {
-        MFCreateAttributes(&mut stream_attrs, 4)?;
+        MFCreateAttributes(&mut stream_attrs, 4).ok()?;
     }
     let stream_attrs = stream_attrs.ok_or_else(|| Error::from(E_FAIL))?;
     // SAFETY: attribute setters and the type handler are called on live interfaces with valid arguments.
     unsafe {
-        desc.GetMediaTypeHandler()?.SetCurrentMediaType(&mt)?;
+        desc.GetMediaTypeHandler()?.SetCurrentMediaType(&mt).ok()?;
         for a in [desc.cast::<IMFAttributes>()?, stream_attrs.clone()] {
-            a.SetGUID(&MF_DEVICESTREAM_STREAM_CATEGORY, &PINNAME_VIDEO_CAPTURE)?;
-            a.SetUINT32(&MF_DEVICESTREAM_STREAM_ID, 0)?;
-            a.SetUINT32(&MF_DEVICESTREAM_FRAMESERVER_SHARED, 1)?;
+            a.SetGUID(&MF_DEVICESTREAM_STREAM_CATEGORY, &PINNAME_VIDEO_CAPTURE)
+                .ok()?;
+            a.SetUINT32(&MF_DEVICESTREAM_STREAM_ID, 0).ok()?;
+            a.SetUINT32(&MF_DEVICESTREAM_FRAMESERVER_SHARED, 1).ok()?;
             a.SetUINT32(
                 &MF_DEVICESTREAM_ATTRIBUTE_FRAMESOURCE_TYPES,
-                MFFrameSourceTypes_Color.0 as u32,
-            )?;
+                MFFrameSourceTypes_Color as u32,
+            )
+            .ok()?;
         }
     }
     // SAFETY: the descriptor slice outlives the call.
     let pd = unsafe { MFCreatePresentationDescriptor(Some(&[Some(desc.clone())]))? };
     // SAFETY: stream 0 exists in the descriptor just created.
-    unsafe { pd.SelectStream(0)? };
+    unsafe { pd.SelectStream(0).ok()? };
 
     let mut attrs = None;
     // SAFETY: the out pointer is a live local.
-    unsafe { MFCreateAttributes(&mut attrs, 10)? };
+    unsafe { MFCreateAttributes(&mut attrs, 10).ok()? };
     let attrs = attrs.ok_or_else(|| Error::from(E_FAIL))?;
     if let Some(init) = init_attrs {
         // SAFETY: both attribute stores are valid.
@@ -117,7 +114,7 @@ pub fn create_source(init_attrs: Option<&IMFAttributes>) -> Result<IMFMediaSourc
 
     // SAFETY: MFCreateEventQueue has no preconditions.
     let queue = unsafe { MFCreateEventQueue()? };
-    let src = windows::core::ComObject::new(Source {
+    let src = windows_core::ComObject::new(Source {
         attrs,
         queue,
         pd,
@@ -136,23 +133,31 @@ fn media_type() -> Result<IMFMediaType> {
     // SAFETY: plain attribute setters on a fresh media type.
     unsafe {
         let mt = MFCreateMediaType()?;
-        mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
-        mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)?;
-        mt.SetUINT64(&MF_MT_FRAME_SIZE, pack(WIDTH, HEIGHT))?;
-        mt.SetUINT64(&MF_MT_FRAME_RATE, pack(FPS, 1))?;
-        mt.SetUINT64(&MF_MT_FRAME_RATE_RANGE_MIN, pack(FPS, 1))?;
-        mt.SetUINT64(&MF_MT_FRAME_RATE_RANGE_MAX, pack(FPS, 1))?;
-        mt.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, pack(1, 1))?;
-        mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-        mt.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)?;
-        mt.SetUINT32(&MF_MT_FIXED_SIZE_SAMPLES, 1)?;
-        mt.SetUINT32(&MF_MT_DEFAULT_STRIDE, WIDTH)?;
-        mt.SetUINT32(&MF_MT_SAMPLE_SIZE, FRAME_BYTES as u32)?;
-        mt.SetUINT32(&MF_MT_AVG_BITRATE, (FRAME_BYTES as u32) * 8 * FPS)?;
-        mt.SetUINT32(&MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709.0 as u32)?;
-        mt.SetUINT32(&MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709.0 as u32)?;
-        mt.SetUINT32(&MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709.0 as u32)?;
-        mt.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235.0 as u32)?;
+        mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).ok()?;
+        mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12).ok()?;
+        mt.SetUINT64(&MF_MT_FRAME_SIZE, pack(WIDTH, HEIGHT)).ok()?;
+        mt.SetUINT64(&MF_MT_FRAME_RATE, pack(FPS, 1)).ok()?;
+        mt.SetUINT64(&MF_MT_FRAME_RATE_RANGE_MIN, pack(FPS, 1))
+            .ok()?;
+        mt.SetUINT64(&MF_MT_FRAME_RATE_RANGE_MAX, pack(FPS, 1))
+            .ok()?;
+        mt.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, pack(1, 1)).ok()?;
+        mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive as u32)
+            .ok()?;
+        mt.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1).ok()?;
+        mt.SetUINT32(&MF_MT_FIXED_SIZE_SAMPLES, 1).ok()?;
+        mt.SetUINT32(&MF_MT_DEFAULT_STRIDE, WIDTH).ok()?;
+        mt.SetUINT32(&MF_MT_SAMPLE_SIZE, FRAME_BYTES as u32).ok()?;
+        mt.SetUINT32(&MF_MT_AVG_BITRATE, (FRAME_BYTES as u32) * 8 * FPS)
+            .ok()?;
+        mt.SetUINT32(&MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709 as u32)
+            .ok()?;
+        mt.SetUINT32(&MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709 as u32)
+            .ok()?;
+        mt.SetUINT32(&MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709 as u32)
+            .ok()?;
+        mt.SetUINT32(&MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235 as u32)
+            .ok()?;
         Ok(mt)
     }
 }
@@ -161,12 +166,9 @@ fn media_type() -> Result<IMFMediaType> {
 macro_rules! event_generator {
     ($ty:ident) => {
         impl IMFMediaEventGenerator_Impl for $ty {
-            fn GetEvent(
-                &self,
-                flags: MEDIA_EVENT_GENERATOR_GET_EVENT_FLAGS,
-            ) -> Result<IMFMediaEvent> {
+            fn GetEvent(&self, flags: u32) -> Result<IMFMediaEvent> {
                 // SAFETY: the queue is a live interface owned by self.
-                unsafe { self.queue.GetEvent(flags.0 as u32) }
+                unsafe { self.queue.GetEvent(flags) }
             }
             fn BeginGetEvent(
                 &self,
@@ -174,7 +176,7 @@ macro_rules! event_generator {
                 state: Ref<'_, IUnknown>,
             ) -> Result<()> {
                 // SAFETY: the queue is live; the callback and state come from the caller.
-                unsafe { self.queue.BeginGetEvent(cb.as_ref(), state.as_ref()) }
+                unsafe { self.queue.BeginGetEvent(cb.as_ref(), state.as_ref()).ok() }
             }
             fn EndGetEvent(&self, res: Ref<'_, IMFAsyncResult>) -> Result<IMFMediaEvent> {
                 // SAFETY: the queue is live; the async result comes from the caller.
@@ -182,27 +184,28 @@ macro_rules! event_generator {
             }
             fn QueueEvent(
                 &self,
-                met: u32,
+                met: MediaEventType,
                 ext: *const GUID,
                 hr: HRESULT,
                 val: *const PROPVARIANT,
             ) -> Result<()> {
                 // SAFETY: the queue is live; the caller's pointers are forwarded as given.
-                unsafe { self.queue.QueueEventParamVar(met, ext, hr, val) }
+                unsafe { self.queue.QueueEventParamVar(met, ext, hr, val).ok() }
             }
         }
     };
 }
 
-fn queue_event(q: &IMFMediaEventQueue, kind: MF_EVENT_TYPE) -> Result<()> {
+fn queue_event(q: &IMFMediaEventQueue, kind: i32) -> Result<()> {
     // SAFETY: an empty variant and the null GUID are valid event parameters.
     unsafe {
         q.QueueEventParamVar(
-            kind.0 as u32,
+            MediaEventType(kind as u32),
             &GUID::zeroed(),
             S_OK,
             &PROPVARIANT::default(),
         )
+        .ok()
     }
 }
 
@@ -242,7 +245,7 @@ impl Source_Impl {
 impl IMFMediaSource_Impl for Source_Impl {
     fn GetCharacteristics(&self) -> Result<u32> {
         self.check()?;
-        Ok(MFMEDIASOURCE_IS_LIVE.0 as u32)
+        Ok(MFMEDIASOURCE_IS_LIVE as u32)
     }
 
     fn CreatePresentationDescriptor(&self) -> Result<IMFPresentationDescriptor> {
@@ -267,7 +270,8 @@ impl IMFMediaSource_Impl for Source_Impl {
         // SAFETY: the queue and stream are valid; pos is either null or a caller-owned variant.
         unsafe {
             self.queue
-                .QueueEventParamUnk(kind.0 as u32, &GUID::zeroed(), S_OK, &unk)?;
+                .QueueEventParamUnk(MediaEventType(kind as u32), &GUID::zeroed(), S_OK, &unk)
+                .ok()?;
             let empty = PROPVARIANT::default();
             let pos = if pos.is_null() {
                 &empty as *const PROPVARIANT
@@ -275,7 +279,13 @@ impl IMFMediaSource_Impl for Source_Impl {
                 pos
             };
             self.queue
-                .QueueEventParamVar(MESourceStarted.0 as u32, &GUID::zeroed(), S_OK, pos)?;
+                .QueueEventParamVar(
+                    MediaEventType(MESourceStarted as u32),
+                    &GUID::zeroed(),
+                    S_OK,
+                    pos,
+                )
+                .ok()?;
         }
         stream_ref(&stream)?.start()
     }
@@ -294,13 +304,13 @@ impl IMFMediaSource_Impl for Source_Impl {
     fn Shutdown(&self) -> Result<()> {
         log!("Shutdown");
         self.shut.store(true, Ordering::Release);
-        if let Some(s) = self.stream.lock().ok().and_then(|mut s| s.take()) {
-            if let Ok(s) = stream_ref(&s) {
-                s.shutdown();
-            }
+        if let Some(s) = self.stream.lock().ok().and_then(|mut s| s.take())
+            && let Ok(s) = stream_ref(&s)
+        {
+            s.shutdown();
         }
         // SAFETY: the queue is a live interface owned by self.
-        unsafe { self.queue.Shutdown() }
+        unsafe { self.queue.Shutdown().ok() }
     }
 }
 
@@ -432,21 +442,19 @@ impl Stream {
             desc,
             tx: Mutex::new(Some(tx)),
             running,
-            state: AtomicI32::new(MF_STREAM_STATE_STOPPED.0),
+            state: AtomicI32::new(MF_STREAM_STATE_STOPPED),
         }
         .into())
     }
 
     fn start(&self) -> Result<()> {
-        self.state
-            .store(MF_STREAM_STATE_RUNNING.0, Ordering::Release);
+        self.state.store(MF_STREAM_STATE_RUNNING, Ordering::Release);
         self.running.store(true, Ordering::Release);
         queue_event(&self.queue, MEStreamStarted)
     }
 
     fn stop(&self) -> Result<()> {
-        self.state
-            .store(MF_STREAM_STATE_STOPPED.0, Ordering::Release);
+        self.state.store(MF_STREAM_STATE_STOPPED, Ordering::Release);
         self.running.store(false, Ordering::Release);
         queue_event(&self.queue, MEStreamStopped)
     }
@@ -540,15 +548,15 @@ impl IMFMediaStream_Impl for Stream_Impl {
 
 impl IMFMediaStream2_Impl for Stream_Impl {
     fn SetStreamState(&self, state: MF_STREAM_STATE) -> Result<()> {
-        log!("SetStreamState {}", state.0);
+        log!("SetStreamState {}", state);
         match state {
             MF_STREAM_STATE_RUNNING => {
-                self.state.store(state.0, Ordering::Release);
+                self.state.store(state, Ordering::Release);
                 self.running.store(true, Ordering::Release);
                 Ok(())
             }
             MF_STREAM_STATE_PAUSED | MF_STREAM_STATE_STOPPED => {
-                self.state.store(state.0, Ordering::Release);
+                self.state.store(state, Ordering::Release);
                 self.running.store(false, Ordering::Release);
                 Ok(())
             }
@@ -557,7 +565,7 @@ impl IMFMediaStream2_Impl for Stream_Impl {
     }
 
     fn GetStreamState(&self) -> Result<MF_STREAM_STATE> {
-        Ok(MF_STREAM_STATE(self.state.load(Ordering::Acquire)))
+        Ok(self.state.load(Ordering::Acquire))
     }
 }
 
@@ -679,19 +687,25 @@ impl Worker {
         unsafe {
             let buf = MFCreateMemoryBuffer(FRAME_BYTES as u32)?;
             let mut dst = std::ptr::null_mut();
-            buf.Lock(&mut dst, None, None)?;
+            buf.Lock(&mut dst, None, None).ok()?;
             std::ptr::copy_nonoverlapping(self.frame.as_ptr(), dst, FRAME_BYTES);
-            buf.Unlock()?;
-            buf.SetCurrentLength(FRAME_BYTES as u32)?;
+            buf.Unlock().ok()?;
+            buf.SetCurrentLength(FRAME_BYTES as u32).ok()?;
             let sample = MFCreateSample()?;
-            sample.AddBuffer(&buf)?;
-            sample.SetSampleTime(time)?;
-            sample.SetSampleDuration(SAMPLE_DURATION)?;
+            sample.AddBuffer(&buf).ok()?;
+            sample.SetSampleTime(time).ok()?;
+            sample.SetSampleDuration(SAMPLE_DURATION).ok()?;
             if let Some(t) = &token {
-                sample.SetUnknown(&MFSampleExtension_Token, t)?;
+                sample.SetUnknown(&MFSampleExtension_Token, t).ok()?;
             }
             self.queue
-                .QueueEventParamUnk(MEMediaSample.0 as u32, &GUID::zeroed(), S_OK, &sample)
+                .QueueEventParamUnk(
+                    MediaEventType(MEMediaSample as u32),
+                    &GUID::zeroed(),
+                    S_OK,
+                    &sample,
+                )
+                .ok()
         }
     }
 }

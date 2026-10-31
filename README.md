@@ -35,7 +35,7 @@ Code layout: [AGENTS.md](AGENTS.md).
 
 Outputs are `eosvcam.exe` and `eosvcam_source.dll`. `.cargo/config.toml` defaults to the `x86_64-pc-windows-gnu` target (Linux cross builds), so on Windows always pass `--target x86_64-pc-windows-msvc`.
 
-**Windows** (Rust MSVC toolchain and Visual Studio Build Tools; with rustup, run `rustup target add x86_64-pc-windows-msvc` once):
+**Windows** (Rust MSVC toolchain with `rustfmt`, and Visual Studio Build Tools; with rustup, run `rustup target add x86_64-pc-windows-msvc` once):
 
 ```powershell
 cargo build --release --target x86_64-pc-windows-msvc
@@ -43,7 +43,7 @@ cargo test --workspace --target x86_64-pc-windows-msvc
 scripts\pack.ps1            # dist\EosVCam.zip
 ```
 
-**Linux** (cross-compile; needs the `x86_64-pc-windows-gnu` Rust standard library, mingw-w64, `zip` and Wine for tests; with rustup, `rustup target add x86_64-pc-windows-gnu`). Developed on Fedora with `rust-std-static-x86_64-pc-windows-gnu`, `mingw64-gcc`, `wine` and `zip`:
+**Linux** (cross-compile; needs the `x86_64-pc-windows-gnu` Rust standard library, mingw-w64, `zip` and Wine for tests; with rustup, `rustup target add x86_64-pc-windows-gnu`). Developed on Fedora with `rust-std-static-x86_64-pc-windows-gnu`, `rustfmt`, `mingw64-gcc`, `wine` and `zip`:
 
 ```sh
 cargo build --release
@@ -53,12 +53,14 @@ scripts/pack.sh             # dist/EosVCam.zip
 
 Clippy is strict by default (the workspace `Cargo.toml` denies `clippy::all` and undocumented `unsafe`). CI also runs `cargo clippy --workspace --all-targets -- -D warnings`; add `--target x86_64-pc-windows-msvc` on Windows.
 
+The build generates Win32 bindings with `windows-bindgen`, which needs `rustfmt` on the `PATH`.
+
 This repository contains no Canon files. Set `SDK_DIR` for `scripts/pack.sh` only for private builds.
 
 ## Limits
 
 * Windows 11 only. Video is fixed at 1280x720, 30 fps, and the camera's own live-view rate applies.
-* Tested on a Canon 600D (T3i) on Windows 11, and developed on Linux (cross-compiled, unit-tested under Wine). Other EDSDK cameras should work. To report results, install, turn the camera on, run `check.bat` and send the zip it creates.
+* Tested on a Canon 600D (T3i) on Windows 11 with the SDK files from EOS Webcam Utility Pro 2.3g (`EOSWebcamUtilityPro-WIN2.3g.zip`), and developed on Linux (cross-compiled, unit-tested under Wine). Other EDSDK cameras should work. To report results, install, turn the camera on, run `check.bat` and send the zip it creates.
 * Other resolutions are not implemented. If your camera reports a live-view size other than the 600D's, please send that `check.bat` zip, whose log records the camera model and live-view size.
 
 ## License

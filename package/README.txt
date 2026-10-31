@@ -11,7 +11,8 @@ What it is
 Install (Windows 11)
   1. Download Canon's "EOS Webcam Utility Pro" for Windows from Canon's support site and
      put the downloaded .zip in this folder, next to install.bat. Only the camera SDK
-     files are taken from it; the utility itself is not installed.
+     files are taken from it; the utility itself is not installed. Tested with version
+     2.3g (EOSWebcamUtilityPro-WIN2.3g.zip).
   2. Double-click install.bat and accept the administrator prompt.
   3. Turn the camera on, connect USB, and pick "EosVCam" in your app.
 

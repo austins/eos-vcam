@@ -11,16 +11,26 @@ pub fn bgr_to_nv12(bgr: &[u8], nv12: &mut [u8]) {
     assert_eq!(nv12.len(), W * H * 3 / 2);
     let (y_plane, uv_plane) = nv12.split_at_mut(W * H);
 
-    for (row, out) in bgr.chunks_exact(W * 3).zip(y_plane.chunks_exact_mut(W)) {
-        for (px, y) in row.chunks_exact(3).zip(out) {
+    for (row, out) in bgr
+        .as_chunks::<{ W * 3 }>()
+        .0
+        .iter()
+        .zip(y_plane.as_chunks_mut::<W>().0)
+    {
+        for (px, y) in row.as_chunks::<3>().0.iter().zip(out) {
             let (b, g, r) = (i32::from(px[0]), i32::from(px[1]), i32::from(px[2]));
             *y = (((47 * r + 157 * g + 16 * b + 128) >> 8) + 16) as u8;
         }
     }
 
-    for (pair, out) in bgr.chunks_exact(W * 6).zip(uv_plane.chunks_exact_mut(W)) {
+    for (pair, out) in bgr
+        .as_chunks::<{ W * 6 }>()
+        .0
+        .iter()
+        .zip(uv_plane.as_chunks_mut::<W>().0)
+    {
         let (top, bottom) = pair.split_at(W * 3);
-        for (x, uv) in out.chunks_exact_mut(2).enumerate() {
+        for (x, uv) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let (mut b, mut g, mut r) = (0, 0, 0);
             for p in [
                 &top[x * 6..],

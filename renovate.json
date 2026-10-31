@@ -25,10 +25,11 @@
             "minimumReleaseAge": "3 days"
         },
         {
-            "description": "windows and windows-core must stay on matching versions.",
+            "description": "windows-rs crates are released together; the windows-bindgen output must match windows-core.",
             "matchPackageNames": [
-                "windows",
-                "windows-core"
+                "windows-bindgen",
+                "windows-core",
+                "windows-services"
             ],
             "groupName": "windows crates"
         }

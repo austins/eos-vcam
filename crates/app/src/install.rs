@@ -10,15 +10,14 @@ use std::{fs, thread};
 
 use anyhow::{Context, Result, bail};
 use eosvcam_shared::shm::{Mapping, status};
-use eosvcam_shared::{CAMERA_NAME, DATA_DIR, SERVICE_NAME, SOURCE_CLSID};
-use windows::Win32::Media::MediaFoundation::{
-    IMFVirtualCamera, MF_VERSION, MFSTARTUP_FULL, MFStartup, MFVirtualCameraAccess,
-    MFVirtualCameraAccess_AllUsers, MFVirtualCameraLifetime, MFVirtualCameraLifetime_System,
-    MFVirtualCameraType, MFVirtualCameraType_SoftwareCameraSource,
+use eosvcam_shared::windows_bindings::{
+    COINIT_MULTITHREADED, CoInitializeEx, GetProcAddress, IMFVirtualCamera, LoadLibraryW,
+    MF_VERSION, MFSTARTUP_FULL, MFStartup, MFVirtualCameraAccess, MFVirtualCameraAccess_AllUsers,
+    MFVirtualCameraLifetime, MFVirtualCameraLifetime_System, MFVirtualCameraType,
+    MFVirtualCameraType_SoftwareCameraSource,
 };
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::core::{GUID, HRESULT, HSTRING, Interface, PCWSTR, s, w};
+use eosvcam_shared::{CAMERA_NAME, DATA_DIR, SERVICE_NAME, SOURCE_CLSID};
+use windows_core::{GUID, HRESULT, HSTRING, Interface, PCWSTR, s, w};
 
 const SOURCE_DLL: &str = "eosvcam_source.dll";
 /// Canon's SDK files; copied when they sit next to the installer.
@@ -101,9 +100,10 @@ fn virtual_camera() -> Result<IMFVirtualCamera> {
     // SAFETY: plain COM/MF initialisation, then a call through a function pointer whose
     // signature matches mfvirtualcamera.h.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED as u32);
+        MFStartup(MF_VERSION as u32, MFSTARTUP_FULL as u32).ok()?;
         let lib = LoadLibraryW(w!("mfsensorgroup.dll"))
+            .ok()
             .context("this Windows has no virtual camera support (needs Windows 11)")?;
         let entry = GetProcAddress(lib, s!("MFCreateVirtualCamera"))
             .context("MFCreateVirtualCamera is missing")?;
@@ -244,7 +244,7 @@ pub fn install(sdk_arg: Option<&Path>) -> Result<()> {
 
     println!("Creating the virtual camera...");
     // SAFETY: Start takes no pointer arguments here.
-    unsafe { virtual_camera()?.Start(None)? };
+    unsafe { virtual_camera()?.Start(None).ok()? };
 
     println!("\nDone. Pick \"{CAMERA_NAME}\" as the video device in your app.");
     println!("Check progress with: eosvcam.exe status   (logs are in {DATA_DIR})");
@@ -254,7 +254,7 @@ pub fn install(sdk_arg: Option<&Path>) -> Result<()> {
 /// Best-effort removal of everything install creates, except the files.
 fn remove_all() {
     // SAFETY: Remove is called on a live virtual camera interface.
-    match virtual_camera().and_then(|vc| unsafe { vc.Remove() }.map_err(Into::into)) {
+    match virtual_camera().and_then(|vc| unsafe { vc.Remove() }.ok().map_err(Into::into)) {
         Ok(()) => println!("  virtual camera removed"),
         Err(e) => println!("  no previous virtual camera to remove ({e})"),
     }

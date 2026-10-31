@@ -11,14 +11,12 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use eosvcam_shared::shm::{FPS, FRAME_BYTES, Mapping};
-use windows::Win32::Media::MediaFoundation::{
-    IMFActivate, IMFMediaSourceEx, IMFMediaStream, IMFSample, MEMediaSample, MENewStream,
-    MESourceStarted, MF_VERSION, MFSTARTUP_FULL, MFStartup,
+use eosvcam_shared::windows_bindings::{
+    COINIT_MULTITHREADED, CoInitializeEx, GetProcAddress, IClassFactory, IMFActivate,
+    IMFMediaSourceEx, IMFMediaStream, IMFSample, LoadLibraryW, MEMediaSample, MENewStream,
+    MESourceStarted, MF_VERSION, MFSTARTUP_FULL, MFStartup, PROPVARIANT,
 };
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, IClassFactory};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::core::{GUID, HRESULT, HSTRING, IUnknown, Interface, PCSTR};
+use windows_core::{GUID, HRESULT, HSTRING, IUnknown, Interface, PCSTR};
 
 use crate::feeder::{self, read_test_counter};
 
@@ -41,6 +39,7 @@ fn load_source() -> Result<IMFMediaSourceEx> {
     // SAFETY: loads our own DLL and calls its documented COM export.
     unsafe {
         let m = LoadLibraryW(&HSTRING::from(dll.as_os_str()))
+            .ok()
             .with_context(|| format!("loading {}", dll.display()))?;
         let entry = GetProcAddress(m, PCSTR(c"DllGetClassObject".as_ptr().cast()))
             .context("no DllGetClassObject")?;
@@ -54,8 +53,9 @@ fn load_source() -> Result<IMFMediaSourceEx> {
             .context("CreateInstance(IMFActivate)")?;
         let test_key = GUID::from_u128(0x11111111_2222_3333_4444_555555555555);
         act.SetUnknown(&test_key, None)
+            .ok()
             .context("SetUnknown(None)")?;
-        act.SetUINT32(&test_key, 42).context("SetUINT32")?;
+        act.SetUINT32(&test_key, 42).ok().context("SetUINT32")?;
         let src = act
             .ActivateObject::<IMFMediaSourceEx>()
             .context("ActivateObject")?;
@@ -77,8 +77,8 @@ pub fn run(seconds: f64) -> Result<()> {
     unsafe { std::env::set_var("EOSVCAM_NS", "SelfTest") };
     // SAFETY: plain COM/MF initialisation on the main thread.
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED as u32);
+        MFStartup(MF_VERSION as u32, MFSTARTUP_FULL as u32).ok()?;
     }
     let stop = AtomicBool::new(false);
     let mut checks = Vec::new();
@@ -126,7 +126,11 @@ fn drive(seconds: f64, checks: &mut Vec<Check>) -> Result<()> {
     let pd = unsafe { source.CreatePresentationDescriptor()? };
     let t_start = Instant::now();
     // SAFETY: as above.
-    unsafe { source.Start(&pd, &GUID::zeroed(), &PROPVARIANT::default())? };
+    unsafe {
+        source
+            .Start(&pd, &GUID::zeroed(), &PROPVARIANT::default())
+            .ok()?
+    };
 
     let mut stream: Option<IMFMediaStream> = None;
     let mut started = false;
@@ -134,13 +138,13 @@ fn drive(seconds: f64, checks: &mut Vec<Check>) -> Result<()> {
         // SAFETY: as above.
         let event = unsafe { source.GetEvent(Default::default())? };
         // SAFETY: event is a live interface returned just above.
-        match unsafe { event.GetType()? } {
-            t if t == MENewStream.0 as u32 => {
+        match unsafe { event.GetType()? }.0 {
+            t if t == MENewStream as u32 => {
                 // SAFETY: as above.
                 let value = unsafe { event.GetValue()? };
-                stream = Some(IUnknown::try_from(&value)?.cast()?);
+                stream = Some(value.into_unknown()?.cast()?);
             }
-            t if t == MESourceStarted.0 as u32 => started = true,
+            t if t == MESourceStarted as u32 => started = true,
             _ => {}
         }
     }
@@ -155,14 +159,14 @@ fn drive(seconds: f64, checks: &mut Vec<Check>) -> Result<()> {
     let mut first_frame = None;
     while t_start.elapsed().as_secs_f64() < seconds {
         // SAFETY: stream and its events are live interfaces owned here.
-        unsafe { stream.RequestSample(None)? };
+        unsafe { stream.RequestSample(None).ok()? };
         let sample: IMFSample = loop {
             // SAFETY: as above.
             let event = unsafe { stream.GetEvent(Default::default())? };
             // SAFETY: as above.
-            if unsafe { event.GetType()? } == MEMediaSample.0 as u32 {
+            if unsafe { event.GetType()? }.0 == MEMediaSample as u32 {
                 // SAFETY: as above.
-                break IUnknown::try_from(&unsafe { event.GetValue()? })?.cast()?;
+                break unsafe { event.GetValue()? }.into_unknown()?.cast()?;
             }
         };
         let now = Instant::now();
@@ -171,10 +175,10 @@ fn drive(seconds: f64, checks: &mut Vec<Check>) -> Result<()> {
         // SAFETY: the buffer is locked for the duration of the read.
         let counter = unsafe {
             let buf = sample.ConvertToContiguousBuffer()?;
-            buf.Lock(&mut ptr, None, Some(&mut len))?;
+            buf.Lock(&mut ptr, None, Some(&mut len)).ok()?;
             let c = (len as usize == FRAME_BYTES)
                 .then(|| read_test_counter(std::slice::from_raw_parts(ptr, FRAME_BYTES)));
-            buf.Unlock()?;
+            buf.Unlock().ok()?;
             c
         };
         arrivals.push(now);
@@ -185,8 +189,8 @@ fn drive(seconds: f64, checks: &mut Vec<Check>) -> Result<()> {
 
     // SAFETY: the source is live and no longer used afterwards.
     unsafe {
-        source.Stop()?;
-        source.Shutdown()?;
+        source.Stop().ok()?;
+        source.Shutdown().ok()?;
     }
 
     let delivered = counters.len();
