@@ -1,22 +1,6 @@
 name: Audit
 
-on:
-    pull_request:
-        branches: [ main ]
-        paths:
-            - '**/Cargo.toml'
-            - 'Cargo.lock'
-            - '.github/workflows/audit.yml'
-    push:
-        branches: [ main ]
-        paths:
-            - '**/Cargo.toml'
-            - 'Cargo.lock'
-            - '.github/workflows/audit.yml'
-    workflow_dispatch:
-
-permissions:
-    contents: read
+on: [ workflow_call, workflow_dispatch ]
 
 jobs:
     audit:

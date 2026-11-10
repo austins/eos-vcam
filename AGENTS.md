@@ -43,13 +43,13 @@ Develop on either OS; the exact commands (build, test, pack, strict clippy) are 
 - The Windows MSVC path has not been verified yet.
 - `eosvcam.exe selftest 3` (from `target/<target>/release/`) checks the media source end to end without a camera. Run `cargo fmt` and strict clippy before committing.
 
-Run `cargo audit` whenever you add or update a dependency, and fix or report any advisory before committing. It is not part of build or test; CI runs it only when `Cargo.toml` or `Cargo.lock` changes.
+Run `cargo audit` whenever you add or update a dependency, and fix or report any advisory before committing. It is not part of build or test; CI runs it on every PR, on pushes to `main` and before a release.
 
 Lints live in the workspace `Cargo.toml` and are strict: `clippy::all`, `undocumented_unsafe_blocks` and `unsafe_op_in_unsafe_fn` are `deny`. Every `unsafe` block needs a `// SAFETY:` comment.
 
 ## CI
 
-`.github/workflows`: `pr.yml` and `main.yml` call `test.yml` (fmt, clippy, tests on `windows-latest`, MSVC target). `audit.yml` runs `rustsec/audit-check` (cargo-audit) on `ubuntu-latest` when a `Cargo.toml` or `Cargo.lock` changes on a PR or push to `main`, or by manual dispatch. `deploy.yml` runs on a published release: tests, `scripts/pack.ps1`, then uploads `EosVCam-<version>.zip` (the tag without any leading `v`) and attests build provenance (GitHub computes the asset's SHA256 digest itself). The tag is validated and passed to the build as `EOSVCAM_VERSION` (shown by `eosvcam.exe version`); local builds report `dev` (the crates have no `version` in `Cargo.toml`). The zip never contains Canon files. None of this has run on GitHub yet.
+`.github/workflows`: `pr.yml` and `main.yml` call `test.yml` (fmt, clippy, tests on `windows-latest`, MSVC target) and `audit.yml` (`rustsec/audit-check`, i.e. cargo-audit, on `ubuntu-latest`) in parallel; `audit.yml` is a required check on `main` (`pr-audit / audit`). `deploy.yml` runs on a published release: tests and the audit in parallel, then `scripts/pack.ps1`, then uploads `EosVCam-<version>.zip` (the tag without any leading `v`) and attests build provenance (GitHub computes the asset's SHA256 digest itself). The tag is validated and passed to the build as `EOSVCAM_VERSION` (shown by `eosvcam.exe version`); local builds report `dev` (the crates have no `version` in `Cargo.toml`). The zip never contains Canon files. None of this has run on GitHub yet.
 
 ## Windows 11 virtual camera pitfalls
 

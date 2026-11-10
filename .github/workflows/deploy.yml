@@ -5,10 +5,15 @@ on:
         types: [ published ]
 
 jobs:
+    audit:
+        permissions:
+            checks: write
+            contents: read
+        uses: ./.github/workflows/audit.yml
     test:
         uses: ./.github/workflows/test.yml
     deploy:
-        needs: test
+        needs: [ audit, test ]
         permissions:
             attestations: write
             contents: write
