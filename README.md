@@ -53,6 +53,8 @@ scripts/pack.sh             # dist/EosVCam.zip
 
 Clippy is strict by default (the workspace `Cargo.toml` denies `clippy::all` and undocumented `unsafe`). CI also runs `cargo clippy --workspace --all-targets -- -D warnings`; add `--target x86_64-pc-windows-msvc` on Windows.
 
+When you add or update a dependency, run `cargo audit` (install once with `cargo install cargo-audit`). CI runs the same check when `Cargo.toml` or `Cargo.lock` changes.
+
 The build generates Win32 bindings with `windows-bindgen`, which needs `rustfmt` on the `PATH`.
 
 This repository contains no Canon files. Set `SDK_DIR` for `scripts/pack.sh` only for private builds.
