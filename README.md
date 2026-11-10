@@ -43,7 +43,7 @@ cargo test --workspace --target x86_64-pc-windows-msvc
 scripts\pack.ps1            # dist\EosVCam.zip
 ```
 
-**Linux** (cross-compile; needs the `x86_64-pc-windows-gnu` Rust standard library, mingw-w64, `zip` and Wine for tests; with rustup, `rustup target add x86_64-pc-windows-gnu`). Developed on Fedora with `rust-std-static-x86_64-pc-windows-gnu`, `rustfmt`, `mingw64-gcc`, `wine` and `zip`:
+**Linux** (cross-compile; needs Rust installed with rustup and `rustfmt`, mingw-w64 (`x86_64-w64-mingw32-gcc`), `zip` and Wine for tests; run `rustup target add x86_64-pc-windows-gnu` once):
 
 ```sh
 cargo build --release
