@@ -49,7 +49,7 @@ Lints live in the workspace `Cargo.toml` and are strict: `clippy::all`, `undocum
 
 ## CI
 
-`.github/workflows`: `pr.yml` and `main.yml` call `test.yml` (fmt, clippy, tests on `windows-latest`, MSVC target) and `audit.yml` (`rustsec/audit-check`, i.e. cargo-audit, on `ubuntu-latest`) in parallel; `audit.yml` is a required check on `main` (`pr-audit / audit`). `deploy.yml` runs on a published release: tests and the audit in parallel, then `scripts/pack.ps1`, then uploads `EosVCam-<version>.zip` (the tag without any leading `v`) and attests build provenance (GitHub computes the asset's SHA256 digest itself). The tag is validated and passed to the build as `EOSVCAM_VERSION` (shown by `eosvcam.exe version`); local builds report `dev` (the crates have no `version` in `Cargo.toml`). The zip never contains Canon files. None of this has run on GitHub yet.
+`.github/workflows`: `pr.yml` and `main.yml` call `test.yml` (fmt, clippy, tests on `windows-latest`, MSVC target) and `audit.yml` (cargo-audit, on `ubuntu-latest`) in parallel; `audit.yml` is a required check on `main` (`pr-audit / audit`). `deploy.yml` runs on a published release: tests and the audit in parallel, then `scripts/pack.ps1`, then uploads `EosVCam-<version>.zip` (the tag without any leading `v`) and attests build provenance (GitHub computes the asset's SHA256 digest itself). The tag is validated and passed to the build as `EOSVCAM_VERSION` (shown by `eosvcam.exe version`); local builds report `dev` (the crates have no `version` in `Cargo.toml`). The zip never contains Canon files. None of this has run on GitHub yet.
 
 ## Windows 11 virtual camera pitfalls
 

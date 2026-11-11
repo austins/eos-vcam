@@ -6,14 +6,15 @@ jobs:
     audit:
         runs-on: ubuntu-latest
         permissions:
-            checks: write
             contents: read
         steps:
             -   name: Checkout
                 uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
                 with:
                     persist-credentials: false
-            -   name: Audit dependencies
-                uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+            -   name: Install cargo-audit
+                uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
                 with:
-                    token: ${{ secrets.GITHUB_TOKEN }}
+                    tool: cargo-audit
+            -   name: Audit dependencies
+                run: cargo audit

@@ -6,9 +6,6 @@ on:
 
 jobs:
     pr-audit:
-        permissions:
-            checks: write
-            contents: read
         uses: ./.github/workflows/audit.yml
     pr-test:
         uses: ./.github/workflows/test.yml
